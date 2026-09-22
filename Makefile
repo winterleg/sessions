@@ -7,3 +7,6 @@ all: compile run
 
 run: compile
 	./sessions
+
+local: compile
+	cp ./sessions ~/.local/bin/sessions

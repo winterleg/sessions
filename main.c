@@ -105,7 +105,6 @@ tmuxSessions(FILE* fileout)
 {
 	// only try to hide the "current" session when we're actually inside tmux
 	char expected[DEF_STRING_SIZE];
-	expected[0] = '\0';
 
 	const char *tmuxEnv = getenv("TMUX");
 	if (tmuxEnv != NULL && tmuxEnv[0] != '\0')
@@ -370,6 +369,9 @@ getSessionName(const char *selected, char **outName, char **outPath)
 	}
 }
 
+// Most of this was generated using duck.ai since i couldn't
+// be bothered to do that myself.  Also, handling stdin into
+// a process is not something that i care to know much about
 int
 run_fzf(FILE *buf, char *selected, size_t selected_size)
 {
@@ -488,7 +490,7 @@ switchTo(const char *sessionName, const char *sessionPath)
 	const char *tmuxEnv = getenv("TMUX");
 
 	// TMUX is set (and non-empty) only when we're inside tmux
-	int insideTMUX = (tmuxEnv != NULL && tmuxEnv[0] != '\0');
+	int insideTMUX = (tmuxEnv != NULL || tmuxEnv[0] != '\0');
 
 	int status;
 
@@ -549,7 +551,7 @@ hasSession(const char *name)
 {
 	char cmd[DEF_STRING_SIZE + 64];
 	// '=' forces an exact session-name match instead of a prefix match
-	snprintf(cmd, sizeof cmd, "tmux has-session -t '=%s' 2>/dev/null", name);
+	snprintf(cmd, sizeof cmd, "tmux has-session -t '%s' 2>/dev/null", name);
 	FILE *pipe = popen(cmd, "r");
 	if (pipe == NULL)
 	{

@@ -1,0 +1,4 @@
+@main.c
+
+* Sessions is not able to be ran by tmux @tmux.conf
+  It outputs: 'sessions' terminated by signal 13
