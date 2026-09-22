@@ -1,0 +1,12 @@
+Hiver
+
+This is a rewrite of my tmux-goway program [1].
+It was too slow to my satisfaction so i rewrote
+most of it to C instead of GO.  It is still
+not fast enough to my expectation, but i'm
+hitting the shell/tmux processing speed limit
+instead of purely being my program's fault.
+
+	Maybe i should just make a cache
+and read from it instead of searching every
+time...  I'm not there yet though.
