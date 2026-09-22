@@ -42,6 +42,9 @@ switchTo(const char *sessionName, const char *sessionPath);
 int
 main()
 {
+	for (int i = 0; i < 3; i++)
+	{
+	}
 	FILE *buffer = tmpfile();
 	if (!buffer)
 	{
@@ -60,12 +63,6 @@ main()
 
 	char selected[DEF_STRING_SIZE];
 	int res = run_fzf(buffer, selected, sizeof selected);
-	fclose(buffer);
-	if (res < 0)
-	{
-		fprintf(stderr, "fzf failed\n");
-		return 1;
-	}
 	if (res == 0)
 	{
 		char *outName = NULL;
@@ -104,28 +101,36 @@ findDirs(FILE *out)
 int
 tmuxSessions(FILE* fileout)
 {
-	FILE *current = popen("tmux display-message -p '#S'", "r");
-	if (!current)
+	// only try to hide the "current" session when we're actually inside tmux
+	char expected[DEF_STRING_SIZE];
+	expected[0] = '\0';
+
+	const char *tmuxEnv = getenv("TMUX");
+	if (tmuxEnv != NULL && tmuxEnv[0] != '\0')
 	{
-		perror("popen");
-		return 1;
-	}
-	char currentLine[128];
-	char expected[DEF_STRING_SIZE] = {0};
-	if (fgets(currentLine, sizeof currentLine, current) != NULL)
-	{
-		if (snprintf(
-			expected,
-			sizeof expected,
-			"[TMUX] %s", currentLine)
-			>= (int)sizeof expected)
+		FILE *current = popen("tmux display-message -p '#S'", "r");
+		if (!current)
 		{
-			fprintf(stderr, "Line too long\n");
-			pclose(current);
+			perror("popen");
 			return 1;
 		}
+		char currentLine[DEF_STRING_SIZE];
+		if (fgets(currentLine, sizeof currentLine, current) != NULL)
+		{
+			if (snprintf(
+				expected,
+				sizeof expected,
+				"[TMUX] %s", currentLine)
+				>= (int)sizeof expected)
+			{
+				fprintf(stderr, "Line too long\n");
+				pclose(current);
+				return 1;
+			}
+		}
+		pclose(current);
 	}
-	pclose(current);
+
 
 	FILE *pipe = popen("tmux list-sessions -F '[TMUX] #{session_name}' 2>/dev/null", "r");
 	if (!pipe)
@@ -428,65 +433,80 @@ int
 switchTo(const char *sessionName, const char *sessionPath)
 {
 	const char *tmuxEnv = getenv("TMUX");
+
+	// TMUX is set (and non-empty) only when we're inside tmux
 	int insideTMUX = (tmuxEnv != NULL && tmuxEnv[0] != '\0');
-	char cmd[1200];
+
+	int status;
 
 	int exists = hasSession(sessionName);
 	if (exists < 0)
-		return 1;
-
-	if (!exists)
 	{
-		// nothing to attach to unless we know where it lives
-		if (sessionPath == NULL)
-		{
-			fprintf(stderr, "no path for new session %s\n",
+		fprintf(stderr, "could not query tmux for session '%s'\n", sessionName);
+		return 1;
+	}
+
+	if (exists == 0)
+	{
+		// session doesn't exist yet: create it detached, then fall
+		// through so we attach/switch to it below
+		char cmd[1048];
+		if (sessionPath != NULL && sessionPath[0] != '\0')
+			snprintf(cmd, sizeof cmd,
+				"tmux new-session -d -s '%s' -c '%s'",
+				sessionName, sessionPath);
+		else
+			snprintf(cmd, sizeof cmd,
+				"tmux new-session -d -s '%s'",
 				sessionName);
-			return 1;
-		}
-		snprintf(cmd, sizeof cmd, "tmux new-session -ds '%s' -c '%s'",
-			sessionName, sessionPath);
-		if (system(cmd) != 0)
+
+		status = system(cmd);
+		if (status == -1 || !WIFEXITED(status) || WEXITSTATUS(status) != 0)
 		{
-			fprintf(stderr, "tmux new-session failed\n");
+			fprintf(stderr, "failed to create session '%s'\n", sessionName);
 			return 1;
 		}
-		// fall through: attach/switch to what we just created
 	}
 
-	// attach needs a real terminal on stdin/stdout, so
-	// system() instead of popen() (which pipes stdout)
 	if (insideTMUX)
-		snprintf(cmd, sizeof cmd, "tmux switch-client -t '%s'",
-			sessionName);
-	else
-		snprintf(cmd, sizeof cmd, "tmux attach-session -t '%s'",
-			sessionName);
-
-	if (system(cmd) != 0)
 	{
-		fprintf(stderr, "tmux %s failed\n",
-			insideTMUX ? "switch-client" : "attach-session");
-		return 1;
+		char switchCmd[512];
+		snprintf(switchCmd, sizeof switchCmd,
+			"tmux switch-client -t '=%s'", sessionName);
+		status = system(switchCmd);
+		if (status == -1 || !WIFEXITED(status) || WEXITSTATUS(status) != 0)
+		{
+			fprintf(stderr, "failed to switch to session '%s'\n", sessionName);
+			return 1;
+		}
+		return 0;
 	}
-	return 0;
+
+	// hand our terminal over to the tmux client; when the user
+	// detaches, tmux exits and so do we
+	char target[DEF_STRING_SIZE + 2];
+	snprintf(target, sizeof target, "=%s", sessionName);
+	execlp("tmux", "tmux", "attach-session", "-t", target, (char *)NULL);
+	perror("execlp tmux");
+	return 1;
 }
 
-// 1 = session exists, 0 = it doesn't, -1 = tmux error
 int
 hasSession(const char *name)
 {
-	char cmd[512];
-	snprintf(cmd, sizeof cmd, "tmux has-session -t '%s' 2>/dev/null", name);
-
-	int status = system(cmd);
-	if (status == -1)
+	char cmd[DEF_STRING_SIZE + 64];
+	// '=' forces an exact session-name match instead of a prefix match
+	snprintf(cmd, sizeof cmd, "tmux has-session -t '=%s' 2>/dev/null", name);
+	FILE *pipe = popen(cmd, "r");
+	if (pipe == NULL)
 	{
-		fprintf(stderr, "Failed to run tmux has-session\n");
+		fprintf(stderr, "Failed to tmux has-session");
 		return -1;
 	}
-	if (!WIFEXITED(status))
+
+	int status = pclose(pipe);
+	if (status == -1)
 		return -1;
 
-	return WEXITSTATUS(status) == 0 ? 1 : 0;
+	return WIFEXITED(status) && WEXITSTATUS(status) == 0;
 }
