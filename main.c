@@ -42,9 +42,6 @@ switchTo(const char *sessionName, const char *sessionPath);
 int
 main()
 {
-	for (int i = 0; i < 3; i++)
-	{
-	}
 	FILE *buffer = tmpfile();
 	if (!buffer)
 	{
