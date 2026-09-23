@@ -408,7 +408,7 @@ run_fzf(FILE *buf, char *selected, size_t selected_size)
         close(from_fzf[0]);
         close(from_fzf[1]);
 
-        execlp("fzf", "fzf", "--no-multi", (char *)NULL);
+	execlp("fzf", "fzf", "--no-multi", "--popup=top,100\%,40\%", (char *)NULL);
 
         perror("execlp fzf");
         _exit(127);
