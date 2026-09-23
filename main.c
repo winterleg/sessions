@@ -9,13 +9,10 @@
 #include <limits.h>
 #include <signal.h>
 
-#ifndef PATH_MAX
 #define PATH_MAX 4096
-#endif
-
 #define DEF_STRING_SIZE 256
-
 #define IGNORE_HIDDEN
+
 const int MAX_DEPTH = 7;
 const int SEARCH_PATHS_COUNT = 3;
 const char * const paths[] = {
