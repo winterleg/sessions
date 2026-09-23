@@ -45,9 +45,17 @@ hasSession(const char *name);
 int
 switchTo(const char *sessionName, const char *sessionPath);
 
+void
+handlePreviousSession();
+
 int
-main()
+main(int argc, char **argv)
 {
+	if (argc == 2 && strcmp(argv[1], "-p") == 0)
+	{
+		handlePreviousSession();
+		return 0;
+	}
 	FILE *buffer = tmpfile();
 	if (!buffer)
 	{
@@ -592,4 +600,37 @@ hasSession(const char *name)
 		return -1;
 
 	return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+}
+
+void
+handlePreviousSession()
+{
+	int insideTMUX = getenv("TMUX") != NULL;
+
+	if (insideTMUX)
+	{
+		popen("tmux switch-client -l", "r");
+	}
+	else
+	{
+		FILE *out = popen("tmux list-sessions -F '#{session_activity} #{session_name}' | sort -rn | head -n 1 | cut -d' ' -f2-", "r");
+		if (out == NULL)
+		{
+			perror("tmux list-sessions");
+			return;
+		}
+
+		char lastSession[DEF_STRING_SIZE];
+		fgets(lastSession, sizeof lastSession, out);
+
+		if (strcmp(lastSession, ""))
+		{
+			fprintf(stderr, "No previous session to switch to");
+			return;
+		}
+
+		char attachCmd[DEF_STRING_SIZE + 128];
+		snprintf(attachCmd, sizeof attachCmd, "tmux attach-session -t %s", lastSession);
+		popen(attachCmd, "r");
+	}
 }
