@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <sys/wait.h>
 #include <limits.h>
+#include <signal.h>
 
 #ifndef PATH_MAX
 #define PATH_MAX 4096
@@ -65,6 +66,8 @@ main()
 
 	char selected[DEF_STRING_SIZE];
 	int res = run_fzf(buffer, selected, sizeof selected);
+	if (res < 0)
+		return 1;
 	if (res == 0)
 	{
 		char *outName = NULL;
@@ -378,6 +381,11 @@ run_fzf(FILE *buf, char *selected, size_t selected_size)
     int to_fzf[2];    // Parent writes, fzf reads
     int from_fzf[2];  // fzf writes, parent reads
 
+    // fzf may exit before we finish feeding it (e.g. it has no usable
+    // tty); ignore SIGPIPE so the write() below reports EPIPE instead
+    // of killing us with signal 13
+    signal(SIGPIPE, SIG_IGN);
+
     if (pipe(to_fzf) == -1 || pipe(from_fzf) == -1) {
         perror("pipe");
         return -1;
@@ -413,11 +421,12 @@ run_fzf(FILE *buf, char *selected, size_t selected_size)
     // Send the contents of buf to fzf.
     char data[4096];
     size_t n;
+    int fzfClosed = 0;
 
-    while ((n = fread(data, 1, sizeof data, buf)) > 0) {
-        ssize_t written = 0;
+    while (!fzfClosed && (n = fread(data, 1, sizeof data, buf)) > 0) {
+        size_t written = 0;
 
-        while ((size_t)written < n) {
+        while (written < n) {
             ssize_t result = write(
                 to_fzf[1],
                 data + written,
@@ -427,6 +436,13 @@ run_fzf(FILE *buf, char *selected, size_t selected_size)
             if (result == -1) {
                 if (errno == EINTR)
                     continue;
+
+                if (errno == EPIPE) {
+                    // fzf gave up on its input; stop feeding it and
+                    // fall through to waitpid() for its exit status
+                    fzfClosed = 1;
+                    break;
+                }
 
                 perror("write");
                 close(to_fzf[1]);
@@ -474,9 +490,21 @@ run_fzf(FILE *buf, char *selected, size_t selected_size)
     int status;
     waitpid(pid, &status, 0);
 
-    // fzf returns 0 for a selection and 1 when Escape/Ctrl-C is used.
-    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+    // fzf returns 0 for a selection, 130 when Escape/Ctrl-C is used
+    // and 1 when nothing matched; anything else means it failed to run.
+    if (!WIFEXITED(status))
+    {
+        fprintf(stderr, "fzf terminated abnormally\n");
+        return -1;
+    }
+    int code = WEXITSTATUS(status);
+    if (code == 130 || code == 1)
         return 1;
+    if (code != 0)
+    {
+        fprintf(stderr, "fzf failed (exit %d)\n", code);
+        return -1;
+    }
 
     // Remove the trailing newline.
     selected[strcspn(selected, "\n")] = '\0';
@@ -490,7 +518,7 @@ switchTo(const char *sessionName, const char *sessionPath)
 	const char *tmuxEnv = getenv("TMUX");
 
 	// TMUX is set (and non-empty) only when we're inside tmux
-	int insideTMUX = (tmuxEnv != NULL || tmuxEnv[0] != '\0');
+	int insideTMUX = tmuxEnv != NULL;
 
 	int status;
 
